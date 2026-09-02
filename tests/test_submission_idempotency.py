@@ -1,3 +1,4 @@
+import asyncio
 from types import SimpleNamespace
 
 from app.models import NotificationJob, Submission
@@ -90,17 +91,21 @@ def test_duplicate_requests_create_one_submission_and_one_notification_job(monke
         lambda _ip: SimpleNamespace(country=None, city=None, provider=None),
     )
 
-    first = submissions.create_submission(
-        public_id="widget-123",
-        request=FakeRequest("checkout-123"),
-        payload=payload,
-        db=db,
+    first = asyncio.run(
+        submissions.create_submission(
+            public_id="widget-123",
+            request=FakeRequest("checkout-123"),
+            payload=payload,
+            db=db,
+        )
     )
-    second = submissions.create_submission(
-        public_id="widget-123",
-        request=FakeRequest("checkout-123"),
-        payload=payload,
-        db=db,
+    second = asyncio.run(
+        submissions.create_submission(
+            public_id="widget-123",
+            request=FakeRequest("checkout-123"),
+            payload=payload,
+            db=db,
+        )
     )
 
     assert first.id == second.id == 42
