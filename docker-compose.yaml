@@ -16,6 +16,16 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build: .
+    container_name: lead-capture-migrate
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/lead_capture
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   api:
     build: .
     container_name: lead-capture-api
@@ -26,8 +36,8 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/lead_capture
       NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL:-}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     build: .
@@ -37,8 +47,8 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@postgres:5432/lead_capture
       NOTIFICATION_WEBHOOK_URL: ${NOTIFICATION_WEBHOOK_URL:-}
     depends_on:
-      postgres:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   postgres_data:
