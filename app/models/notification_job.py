@@ -50,7 +50,10 @@ class NotificationJob(Base):
         default=lambda: datetime.now(timezone.utc),
     )
 
-    submission = relationship("Submission")
+    submission: Mapped["Submission"] = relationship(
+        "Submission",
+        back_populates="notification_jobs",
+    )
 
     __table_args__ = (
         Index(
