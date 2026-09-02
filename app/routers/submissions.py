@@ -8,6 +8,7 @@ from app.database import get_db
 from app.models import Submission, Widget
 from app.rate_limit import submission_limiter
 from app.schemas.submission import SubmissionRequest, SubmissionResponse
+from app.services.geo import enrich_ip
 
 
 router = APIRouter(prefix="/public", tags=["Public Submissions"])
@@ -74,10 +75,15 @@ async def create_submission(
             headers={"Retry-After": "60"},
         )
 
+    geo = enrich_ip(client_ip if client_ip != "unknown" else None)
+
     submission = Submission(
         widget_id=widget.id,
         data=payload.data,
         ip_address=client_ip if client_ip != "unknown" else None,
+        country=geo.country,
+        city=geo.city,
+        geo_provider=geo.provider,
     )
     db.add(submission)
     db.commit()
