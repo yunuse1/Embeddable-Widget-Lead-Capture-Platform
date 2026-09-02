@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Second-Origin Widget Demo</title>
+</head>
+<body>
+  <h1>Cross-Origin Widget Demo</h1>
+  <p>This page is intended to be served from a different origin/port than the API.</p>
+  <div data-lead-widget="REPLACE_WITH_PUBLIC_WIDGET_ID"></div>
+  <script
+    src="http://localhost:8000/public/widget/v1/widget.js"
+    data-widget-id="REPLACE_WITH_PUBLIC_WIDGET_ID"
+    async
+  ></script>
+</body>
+</html>
