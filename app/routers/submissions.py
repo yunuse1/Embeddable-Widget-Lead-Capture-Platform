@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -17,6 +18,7 @@ router = APIRouter(prefix="/public", tags=["Public Submissions"])
 MAX_FIELDS = 30
 MAX_VALUE_LENGTH = 2000
 MAX_PAYLOAD_BYTES = 32_000
+MAX_IDEMPOTENCY_KEY_LENGTH = 255
 
 
 def get_client_ip(request: Request) -> str | None:
@@ -35,6 +37,19 @@ def validate_submission_data(data: dict[str, Any]) -> None:
             raise HTTPException(status_code=422, detail="Field name is too long")
         if isinstance(value, str) and len(value) > MAX_VALUE_LENGTH:
             raise HTTPException(status_code=422, detail=f"Field '{key}' is too long")
+
+
+def get_idempotency_key(request: Request) -> str | None:
+    key = request.headers.get("Idempotency-Key")
+    if key is None:
+        return None
+
+    key = key.strip()
+    if not key:
+        return None
+    if len(key) > MAX_IDEMPOTENCY_KEY_LENGTH:
+        raise HTTPException(status_code=422, detail="Idempotency-Key is too long")
+    return key
 
 
 @router.post(
@@ -65,6 +80,17 @@ async def create_submission(
         raise HTTPException(status_code=422, detail="Spam submission rejected")
 
     validate_submission_data(payload.data)
+    idempotency_key = get_idempotency_key(request)
+
+    if idempotency_key is not None:
+        existing = db.scalar(
+            select(Submission).where(
+                Submission.widget_id == widget.id,
+                Submission.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is not None:
+            return SubmissionResponse(id=existing.id, status="accepted")
 
     client_ip = get_client_ip(request) or "unknown"
     rate_limit_key = f"submission:{widget.id}:{client_ip}"
@@ -80,6 +106,7 @@ async def create_submission(
     submission = Submission(
         widget_id=widget.id,
         data=payload.data,
+        idempotency_key=idempotency_key,
         ip_address=client_ip if client_ip != "unknown" else None,
         country=geo.country,
         city=geo.city,
@@ -95,7 +122,23 @@ async def create_submission(
     )
     db.add(notification_job)
 
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        if idempotency_key is None:
+            raise
+
+        existing = db.scalar(
+            select(Submission).where(
+                Submission.widget_id == widget.id,
+                Submission.idempotency_key == idempotency_key,
+            )
+        )
+        if existing is None:
+            raise
+        return SubmissionResponse(id=existing.id, status="accepted")
+
     db.refresh(submission)
 
     return SubmissionResponse(id=submission.id, status="accepted")
