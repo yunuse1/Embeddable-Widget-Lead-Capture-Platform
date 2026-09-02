@@ -59,6 +59,8 @@ def widget_script():
       return response.json();
     })
     .then((config) => {
+      const form = document.createElement("form");
+      form.noValidate = false;
       const wrapper = document.createElement("div");
       wrapper.style.maxWidth = "420px";
       wrapper.style.padding = "20px";
@@ -90,13 +92,53 @@ def widget_script():
         label.appendChild(input);
         wrapper.appendChild(label);
       });
+      const honeypot = document.createElement("input");
+      honeypot.type = "text";
+      honeypot.name = "website";
+      honeypot.autocomplete = "off";
+      honeypot.tabIndex = -1;
+      honeypot.style.position = "absolute";
+      honeypot.style.left = "-10000px";
+      honeypot.setAttribute("aria-hidden", "true");
+      form.appendChild(honeypot);
       const button = document.createElement("button");
-      button.type = "button";
+      button.type = "submit";
       button.textContent = config.button_text || "Submit";
       button.style.marginTop = "16px";
       button.style.padding = "10px 16px";
-      wrapper.appendChild(button);
+      form.appendChild(button);
+      const message = document.createElement("p");
+      message.setAttribute("role", "status");
+      form.appendChild(message);
+      wrapper.appendChild(form);
       mount.replaceChildren(wrapper);
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!form.reportValidity()) return;
+        button.disabled = true;
+        message.textContent = "Submitting...";
+        const data = {};
+        (config.fields || []).forEach((field) => {
+          const input = form.elements.namedItem(field.name || "field");
+          if (input) data[input.name] = input.value;
+        });
+        try {
+          const response = await fetch(`${apiBase}/public/widgets/${encodeURIComponent(widgetId)}/submissions`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data, honeypot: honeypot.value }),
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.detail || "Submission failed");
+          message.textContent = "Thanks! Your submission was received.";
+          form.reset();
+        } catch (error) {
+          message.textContent = error.message || "Submission failed";
+        } finally {
+          button.disabled = false;
+        }
+      });
     })
     .catch((error) => console.error("Lead capture widget error:", error));
 })();'''
