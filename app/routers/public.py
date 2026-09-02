@@ -37,7 +37,7 @@ def get_embed_snippet(public_id: str, request: Request, db: Session = Depends(ge
     if widget is None:
         raise HTTPException(status_code=404, detail="Widget not found")
     base_url = str(request.base_url).rstrip("/")
-    script_url = f"{base_url}/widget/v1/widget.js"
+    script_url = f"{base_url}/public/widget/v1/widget.js"
     snippet = f'<div data-lead-widget="{widget.public_id}"></div>\n<script src="{script_url}" data-widget-id="{widget.public_id}" async></script>'
     return {"public_id": widget.public_id, "script_url": script_url, "snippet": snippet}
 
@@ -60,7 +60,6 @@ def widget_script():
     })
     .then((config) => {
       const form = document.createElement("form");
-      form.noValidate = false;
       const wrapper = document.createElement("div");
       wrapper.style.maxWidth = "420px";
       wrapper.style.padding = "20px";
@@ -68,7 +67,7 @@ def widget_script():
       wrapper.style.borderRadius = "12px";
       wrapper.style.fontFamily = "Arial, sans-serif";
       const title = document.createElement("h3");
-      title.textContent = config.title;
+      title.textContent = config.title || "Lead capture";
       wrapper.appendChild(title);
       if (config.description) {
         const description = document.createElement("p");
@@ -90,7 +89,7 @@ def widget_script():
         input.style.marginTop = "6px";
         input.style.padding = "10px";
         label.appendChild(input);
-        wrapper.appendChild(label);
+        form.appendChild(label);
       });
       const honeypot = document.createElement("input");
       honeypot.type = "text";
@@ -142,4 +141,4 @@ def widget_script():
     })
     .catch((error) => console.error("Lead capture widget error:", error));
 })();'''
-    return PlainTextResponse(content=script, media_type="application/javascript", headers={"Cache-Control": "public, max-age=3600", "X-Widget-Version": "v1"})
+    return PlainTextResponse(content=script, media_type="application/javascript", headers={"Cache-Control": "public, max-age=86400", "X-Widget-Version": "v1"})
