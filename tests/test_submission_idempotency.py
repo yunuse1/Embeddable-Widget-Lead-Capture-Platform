@@ -1,7 +1,5 @@
 from types import SimpleNamespace
 
-import pytest
-
 from app.models import NotificationJob, Submission
 from app.routers import submissions
 from app.schemas.submission import SubmissionRequest
@@ -74,8 +72,7 @@ def test_idempotency_key_is_stored_on_submission():
     assert submission.idempotency_key == "checkout-123"
 
 
-@pytest.mark.asyncio
-async def test_duplicate_requests_create_one_submission_and_one_notification_job(monkeypatch):
+def test_duplicate_requests_create_one_submission_and_one_notification_job(monkeypatch):
     widget = SimpleNamespace(id=7, public_id="widget-123", is_active=True)
     db = FakeDB(widget)
     payload = SubmissionRequest(
@@ -93,13 +90,13 @@ async def test_duplicate_requests_create_one_submission_and_one_notification_job
         lambda _ip: SimpleNamespace(country=None, city=None, provider=None),
     )
 
-    first = await submissions.create_submission(
+    first = submissions.create_submission(
         public_id="widget-123",
         request=FakeRequest("checkout-123"),
         payload=payload,
         db=db,
     )
-    second = await submissions.create_submission(
+    second = submissions.create_submission(
         public_id="widget-123",
         request=FakeRequest("checkout-123"),
         payload=payload,
