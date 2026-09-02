@@ -1,19 +1,34 @@
 from types import SimpleNamespace
 
-from app.models import Submission
+import pytest
+
+from app.models import NotificationJob, Submission
 from app.routers import submissions
+from app.schemas.submission import SubmissionRequest
 
 
-class FakeScalarDB:
-    def __init__(self, existing=None):
-        self.existing = existing
+class FakeRequest:
+    def __init__(self, key: str | None):
+        self.headers = {}
+        if key is not None:
+            self.headers["Idempotency-Key"] = key
+        self.client = SimpleNamespace(host="127.0.0.1")
+
+
+class FakeDB:
+    def __init__(self, widget):
+        self.widget = widget
+        self.submission = None
+        self.notification_jobs = []
         self.added = []
         self.commits = 0
         self.flushes = 0
-        self.refreshed = []
 
     def scalar(self, query):
-        return self.existing
+        statement = str(query)
+        if "widgets" in statement:
+            return self.widget
+        return self.submission
 
     def add(self, obj):
         self.added.append(obj)
@@ -21,40 +36,32 @@ class FakeScalarDB:
     def flush(self):
         self.flushes += 1
         for obj in self.added:
-            if getattr(obj, "id", None) is None and isinstance(obj, Submission):
+            if isinstance(obj, Submission) and obj.id is None:
                 obj.id = 42
+                self.submission = obj
+            elif isinstance(obj, NotificationJob) and obj not in self.notification_jobs:
+                self.notification_jobs.append(obj)
 
     def commit(self):
         self.commits += 1
 
+    def rollback(self):
+        pass
+
     def refresh(self, obj):
-        self.refreshed.append(obj)
+        pass
 
 
 def test_get_idempotency_key_accepts_and_normalizes_header():
-    request = SimpleNamespace(headers={"Idempotency-Key": "  checkout-123  "})
+    request = FakeRequest("  checkout-123  ")
 
     assert submissions.get_idempotency_key(request) == "checkout-123"
 
 
 def test_get_idempotency_key_rejects_empty_header():
-    request = SimpleNamespace(headers={"Idempotency-Key": "   "})
+    request = FakeRequest("   ")
 
     assert submissions.get_idempotency_key(request) is None
-
-
-def test_duplicate_submission_can_be_detected_before_insert():
-    existing = SimpleNamespace(id=42)
-    db = FakeScalarDB(existing=existing)
-    request = SimpleNamespace(headers={"Idempotency-Key": "checkout-123"})
-
-    key = submissions.get_idempotency_key(request)
-    result = db.scalar(None)
-
-    assert key == "checkout-123"
-    assert result.id == 42
-    assert db.added == []
-    assert db.commits == 0
 
 
 def test_idempotency_key_is_stored_on_submission():
@@ -65,3 +72,43 @@ def test_idempotency_key_is_stored_on_submission():
     )
 
     assert submission.idempotency_key == "checkout-123"
+
+
+@pytest.mark.asyncio
+async def test_duplicate_requests_create_one_submission_and_one_notification_job(monkeypatch):
+    widget = SimpleNamespace(id=7, public_id="widget-123", is_active=True)
+    db = FakeDB(widget)
+    payload = SubmissionRequest(
+        data={"email": "lead@example.com", "name": "Test Lead"}
+    )
+
+    monkeypatch.setattr(
+        submissions.submission_limiter,
+        "allow",
+        lambda _key: True,
+    )
+    monkeypatch.setattr(
+        submissions,
+        "enrich_ip",
+        lambda _ip: SimpleNamespace(country=None, city=None, provider=None),
+    )
+
+    first = await submissions.create_submission(
+        public_id="widget-123",
+        request=FakeRequest("checkout-123"),
+        payload=payload,
+        db=db,
+    )
+    second = await submissions.create_submission(
+        public_id="widget-123",
+        request=FakeRequest("checkout-123"),
+        payload=payload,
+        db=db,
+    )
+
+    assert first.id == second.id == 42
+    assert first.status == second.status == "accepted"
+    assert db.commits == 1
+    assert len([obj for obj in db.added if isinstance(obj, Submission)]) == 1
+    assert len([obj for obj in db.added if isinstance(obj, NotificationJob)]) == 1
+    assert db.submission.idempotency_key == "checkout-123"
