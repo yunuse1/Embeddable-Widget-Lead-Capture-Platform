@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 from sqlalchemy import select
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal
@@ -44,9 +44,11 @@ def recover_stale_jobs(db: Session) -> int:
 def claim_next_job(db: Session) -> NotificationJob | None:
     now = datetime.now(timezone.utc)
 
+    # Lock only notification_jobs. joinedload() would add a LEFT OUTER JOIN
+    # to submissions, and PostgreSQL rejects FOR UPDATE on the nullable side
+    # of that join. The submission relationship is loaded after the claim.
     job = db.scalar(
         select(NotificationJob)
-        .options(joinedload(NotificationJob.submission))
         .where(
             NotificationJob.status == "pending",
             NotificationJob.available_at <= now,
