@@ -29,7 +29,13 @@ class FakeDB:
     def scalars(self, query):
         class Result:
             def all(inner_self):
-                if self.job.status == "processing":
+                if (
+                    self.job.status == "processing"
+                    and self.job.processing_started_at is not None
+                    and self.job.processing_started_at
+                    <= datetime.now(timezone.utc)
+                    - timedelta(seconds=notification_worker.PROCESSING_TIMEOUT_SECONDS)
+                ):
                     return [self.job]
                 return []
 
@@ -97,7 +103,10 @@ def test_non_stale_processing_job_is_not_recovered():
 
     recovered = notification_worker.recover_stale_jobs(db)
 
-    assert recovered == 1
+    assert recovered == 0
+    assert job.status == "processing"
+    assert job.processing_started_at is not None
+    assert db.commits == 0
 
 
 def test_failed_delivery_keeps_job_retryable_and_submission_intact(monkeypatch):
