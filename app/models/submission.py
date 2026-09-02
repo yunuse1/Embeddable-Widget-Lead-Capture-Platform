@@ -15,6 +15,7 @@ from app.database import Base
 
 if TYPE_CHECKING:
     from app.models.widget import Widget
+    from app.models.notification_job import NotificationJob
 
 
 class Submission(Base):
@@ -62,6 +63,11 @@ class Submission(Base):
 
     widget: Mapped["Widget"] = relationship(
         back_populates="submissions"
+    )
+
+    notification_jobs: Mapped[list["NotificationJob"]] = relationship(
+        back_populates="submission",
+        cascade="all, delete-orphan"
     )
 
     __table_args__ = (
