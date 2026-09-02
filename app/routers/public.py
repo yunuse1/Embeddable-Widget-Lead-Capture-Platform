@@ -97,4 +97,3 @@ def widget_script():
     .catch((error) => console.error("Lead capture widget error:", error));
 })();'''
     return PlainTextResponse(content=script, media_type="application/javascript", headers={"Cache-Control": "public, max-age=3600", "X-Widget-Version": "v1"})
-'''
