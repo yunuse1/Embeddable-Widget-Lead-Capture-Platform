@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from app.models import Submission
 from app.routers import submissions
 
 
@@ -20,7 +21,7 @@ class FakeScalarDB:
     def flush(self):
         self.flushes += 1
         for obj in self.added:
-            if getattr(obj, "id", None) is None and obj.__class__.__name__ == "Submission":
+            if getattr(obj, "id", None) is None and isinstance(obj, Submission):
                 obj.id = 42
 
     def commit(self):
@@ -42,21 +43,21 @@ def test_get_idempotency_key_rejects_empty_header():
     assert submissions.get_idempotency_key(request) is None
 
 
-def test_duplicate_request_returns_existing_submission_without_creating_job():
+def test_duplicate_submission_can_be_detected_before_insert():
     existing = SimpleNamespace(id=42)
     db = FakeScalarDB(existing=existing)
     request = SimpleNamespace(headers={"Idempotency-Key": "checkout-123"})
 
-    result = submissions.get_idempotency_key(request)
+    key = submissions.get_idempotency_key(request)
+    result = db.scalar(None)
 
-    assert result == "checkout-123"
+    assert key == "checkout-123"
+    assert result.id == 42
     assert db.added == []
     assert db.commits == 0
 
 
 def test_idempotency_key_is_stored_on_submission():
-    from app.models import Submission
-
     submission = Submission(
         widget_id=7,
         data={"email": "lead@example.com"},
