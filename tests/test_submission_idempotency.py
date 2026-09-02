@@ -52,15 +52,11 @@ class FakeDB:
 
 
 def test_get_idempotency_key_accepts_and_normalizes_header():
-    request = FakeRequest("  checkout-123  ")
-
-    assert submissions.get_idempotency_key(request) == "checkout-123"
+    assert submissions.get_idempotency_key("  checkout-123  ") == "checkout-123"
 
 
 def test_get_idempotency_key_rejects_empty_header():
-    request = FakeRequest("   ")
-
-    assert submissions.get_idempotency_key(request) is None
+    assert submissions.get_idempotency_key("   ") is None
 
 
 def test_idempotency_key_is_stored_on_submission():
@@ -97,6 +93,7 @@ def test_duplicate_requests_create_one_submission_and_one_notification_job(monke
             request=FakeRequest("checkout-123"),
             payload=payload,
             db=db,
+            idempotency_key="checkout-123",
         )
     )
     second = asyncio.run(
@@ -105,6 +102,7 @@ def test_duplicate_requests_create_one_submission_and_one_notification_job(monke
             request=FakeRequest("checkout-123"),
             payload=payload,
             db=db,
+            idempotency_key="checkout-123",
         )
     )
 
