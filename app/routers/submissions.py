@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.models import Submission, Widget
+from app.rate_limit import submission_limiter
 from app.schemas.submission import SubmissionRequest, SubmissionResponse
 
 
@@ -64,10 +65,19 @@ async def create_submission(
 
     validate_submission_data(payload.data)
 
+    client_ip = get_client_ip(request) or "unknown"
+    rate_limit_key = f"submission:{widget.id}:{client_ip}"
+    if not submission_limiter.allow(rate_limit_key):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many submissions. Please try again later.",
+            headers={"Retry-After": "60"},
+        )
+
     submission = Submission(
         widget_id=widget.id,
         data=payload.data,
-        ip_address=get_client_ip(request),
+        ip_address=client_ip if client_ip != "unknown" else None,
     )
     db.add(submission)
     db.commit()
