@@ -58,6 +58,11 @@ def deliver_webhook(job: NotificationJob) -> None:
 
 
 def process_job(db: Session, job: NotificationJob) -> None:
+    # A completed job must never execute its external side effect again.
+    # This protects against accidental duplicate worker invocation.
+    if job.status in {"processed", "failed"}:
+        return
+
     try:
         deliver_webhook(job)
     except Exception as exc:
