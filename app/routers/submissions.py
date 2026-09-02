@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import Submission, Widget
+from app.models import NotificationJob, Submission, Widget
 from app.rate_limit import submission_limiter
 from app.schemas.submission import SubmissionRequest, SubmissionResponse
 from app.services.geo import enrich_ip
@@ -86,6 +86,15 @@ async def create_submission(
         geo_provider=geo.provider,
     )
     db.add(submission)
+    db.flush()
+
+    notification_job = NotificationJob(
+        submission_id=submission.id,
+        job_type="webhook",
+        status="pending",
+    )
+    db.add(notification_job)
+
     db.commit()
     db.refresh(submission)
 
