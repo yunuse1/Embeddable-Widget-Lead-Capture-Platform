@@ -53,11 +53,11 @@ Normal worker processing skips jobs already marked `processed` or `failed`, prev
 
 ## 8. Abuse and payload controls
 
-The public endpoint enforces a 32 KB request-size ceiling, maximum 30 fields, maximum 100-character field names, maximum 2,000-character string values, a honeypot field, and per-widget/client-IP rate limiting. The endpoint also supports `Idempotency-Key`. fileciteturn386file0L2-L2
+The public endpoint enforces a 32 KB request-size ceiling, maximum 30 fields, maximum 100-character field names, maximum 2,000-character string values, a honeypot field, and per-widget/client-IP rate limiting. The endpoint also supports `Idempotency-Key`.
 
 ## 9. Geo enrichment fallback
 
-IP enrichment tries `ip-api.com`, then falls back to `ipapi.co`, and returns an empty geo result if both providers fail. fileciteturn388file0L2-L2
+IP enrichment tries `ip-api.com`, then falls back to `ipapi.co`, and returns an empty geo result if both providers fail.
 
 ## 10. Containerized runtime
 
@@ -71,7 +71,16 @@ Run the canonical capstone command:
 docker compose exec api python -m pytest -q
 ```
 
-The repository now includes focused coverage for public submission validation, rate limiting, honeypot behavior, and geo fallback in addition to the existing reliability tests.
+The repository includes focused coverage for public submission validation, rate limiting, honeypot behavior, and geo fallback in addition to the existing reliability tests.
+
+## 12. Screenshot evidence
+
+The repository includes reproducible terminal test evidence in `assets/`:
+
+- [`assets/seed_and_tests.png`](assets/seed_and_tests.png) — seed/setup output and automated test execution evidence.
+- [`assets/tests.png`](assets/tests.png) — automated test output evidence.
+
+These screenshots are supporting artifacts only; the authoritative verification remains the test suite itself and the canonical command above.
 
 ## Requirement-to-proof summary
 
