@@ -14,6 +14,31 @@ MAX_ATTEMPTS = 5
 POLL_INTERVAL_SECONDS = 2
 BASE_BACKOFF_SECONDS = 5
 REQUEST_TIMEOUT_SECONDS = 10
+PROCESSING_TIMEOUT_SECONDS = 60
+
+
+def recover_stale_jobs(db: Session) -> int:
+    """Return jobs stuck in processing to the pending queue after a worker crash."""
+    stale_before = datetime.now(timezone.utc) - timedelta(
+        seconds=PROCESSING_TIMEOUT_SECONDS
+    )
+
+    jobs = db.scalars(
+        select(NotificationJob).where(
+            NotificationJob.status == "processing",
+            NotificationJob.processing_started_at <= stale_before,
+        )
+    ).all()
+
+    for job in jobs:
+        job.status = "pending"
+        job.available_at = datetime.now(timezone.utc)
+        job.processing_started_at = None
+
+    if jobs:
+        db.commit()
+
+    return len(jobs)
 
 
 def claim_next_job(db: Session) -> NotificationJob | None:
@@ -34,6 +59,7 @@ def claim_next_job(db: Session) -> NotificationJob | None:
         return None
 
     job.status = "processing"
+    job.processing_started_at = now
     db.commit()
     db.refresh(job)
     return job
@@ -68,6 +94,7 @@ def process_job(db: Session, job: NotificationJob) -> None:
     except Exception as exc:
         job.attempts += 1
         job.last_error = str(exc)[:4000]
+        job.processing_started_at = None
 
         if job.attempts >= MAX_ATTEMPTS:
             job.status = "failed"
@@ -84,6 +111,7 @@ def process_job(db: Session, job: NotificationJob) -> None:
 
     job.status = "processed"
     job.processed_at = datetime.now(timezone.utc)
+    job.processing_started_at = None
     job.last_error = None
     db.commit()
 
@@ -94,6 +122,7 @@ def run_worker() -> None:
     while True:
         db = SessionLocal()
         try:
+            recover_stale_jobs(db)
             job = claim_next_job(db)
             if job is None:
                 time.sleep(POLL_INTERVAL_SECONDS)
