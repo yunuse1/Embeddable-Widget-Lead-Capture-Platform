@@ -7,7 +7,8 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     JSON,
-    Index
+    Index,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,6 +33,11 @@ class Submission(Base):
     data: Mapped[dict] = mapped_column(
         JSON,
         nullable=False
+    )
+
+    idempotency_key: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
     )
 
     ip_address: Mapped[str | None] = mapped_column(
@@ -75,5 +81,10 @@ class Submission(Base):
             "ix_submissions_widget_created_at",
             "widget_id",
             "created_at"
+        ),
+        UniqueConstraint(
+            "widget_id",
+            "idempotency_key",
+            name="uq_submissions_widget_idempotency_key",
         ),
     )
