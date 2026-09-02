@@ -1,6 +1,17 @@
 # Implementation Evidence
 
-This document maps the capstone reliability requirements to the implementation and automated tests in this repository.
+This document maps the capstone reliability requirements and evaluator probes to implementation and automated verification. Manual checks are explicitly marked so no terminal/browser result is claimed before it is actually run.
+
+## Evaluator probe map
+
+| Probe | Expected behavior | Automated evidence | Manual evidence |
+|---|---|---|---|
+| Probe 1 — valid public submission | Valid lead returns success and is persisted | Existing submission/idempotency/worker test coverage | Run a real POST against a seeded active widget |
+| Probe 2 — malformed/oversized payload | Invalid or oversized input returns 4xx | `tests/test_public_submission.py`, `tests/test_spam_honeypot.py` | Send a request whose `Content-Length` exceeds 32 KB |
+| Probe 3 — rate limit | Repeated submissions from the same widget/IP eventually return 429 | `tests/test_rate_limit.py` covers limiter behavior | Send 6 rapid public submissions from one client/IP |
+| Probe 4 — geo fallback | Provider A failure falls through to provider B; both failures remain non-fatal | `tests/test_geo_fallback.py` | Optional live geo lookup check |
+| Probe 5 — durable notification | Lead remains persisted while notification is retried asynchronously | Existing worker/submission tests | Stop/replace webhook receiver and inspect job state |
+| Probe 6 — honeypot | Filled honeypot is rejected as spam | `tests/test_spam_honeypot.py` plus endpoint logic | Submit the rendered widget with the hidden honeypot populated |
 
 ## 1. Safe side effects
 
@@ -10,133 +21,57 @@ This document maps the capstone reliability requirements to the implementation a
 
 **Evidence:** `app/routers/submissions.py` creates the submission, flushes it to obtain its ID, creates a pending notification job, and commits them together. `app/services/notification_worker.py` owns the external webhook call and catches delivery failures.
 
-**Test:** Worker failure tests verify that delivery can fail while the submission remains intact.
-
----
-
 ## 2. Durable background jobs
 
-**Requirement:** Side effects should survive the end of the HTTP request and be processed asynchronously.
+**Requirement:** Side effects survive the HTTP request and are processed asynchronously.
 
-**Implementation:** `notification_jobs` is a PostgreSQL-backed table linked to `submissions`. Jobs have explicit lifecycle states and timestamps.
-
-**Evidence:** `NotificationJob` stores `pending`, `processing`, `processed`, and `failed` state, retry attempts, availability time, errors, and processing timestamps.
-
-**Test:** Worker tests cover claiming and processing pending jobs.
-
----
+**Implementation:** `notification_jobs` is PostgreSQL-backed and linked to `submissions`, with explicit lifecycle and retry state.
 
 ## 3. Idempotent submission handling
 
 **Requirement:** Client retries must not create duplicate leads or duplicate notification jobs.
 
-**Implementation:** `Idempotency-Key` is scoped to the widget and protected by a database uniqueness constraint on `(widget_id, idempotency_key)`. The API also handles a concurrent uniqueness conflict safely.
+**Implementation:** `Idempotency-Key` is scoped to the widget and protected by a database uniqueness constraint on `(widget_id, idempotency_key)`. Concurrent uniqueness conflicts are handled safely.
 
-**Evidence:** `Submission` defines the unique constraint; `create_submission` checks for an existing submission before inserting and handles `IntegrityError` for concurrent requests.
-
-**Test:** `tests/test_submission_idempotency.py` verifies two requests with the same key return the same submission ID and create exactly one submission and one notification job.
-
----
+**Automated proof:** `tests/test_submission_idempotency.py` when present in the repository's existing suite.
 
 ## 4. Retry and exponential backoff
 
-**Requirement:** Temporary webhook failures should be retried without blocking the lead submission.
-
-**Implementation:** Failed jobs increment `attempts`, remain `pending`, and receive an exponentially increasing `available_at` delay. After five attempts the job becomes permanently `failed`.
-
-**Backoff policy:**
-
-```text
-attempt 1 -> 5s
-attempt 2 -> 10s
-attempt 3 -> 20s
-attempt 4 -> 40s
-attempt 5 -> failed
-```
-
-**Test:** Worker tests cover retry behavior and permanent failure after `MAX_ATTEMPTS`.
-
----
+Failed jobs increment `attempts`, remain retryable until the maximum attempt count, and receive exponentially increasing `available_at` delays. After five attempts the job becomes `failed`.
 
 ## 5. Worker crash / stale processing recovery
 
-**Requirement:** A job must not remain permanently stuck if a worker stops while processing it.
+Claimed jobs receive `processing_started_at`. Stale processing state is reset so another worker can retry the job.
 
-**Implementation:** Claimed jobs receive `processing_started_at`. Jobs that remain in `processing` longer than the configured processing timeout are reset to `pending` and made immediately available for another attempt.
+## 6. At-least-once delivery
 
-**Evidence:** `NotificationJob.processing_started_at` plus the worker's stale-job recovery logic.
+Delivery is explicitly at-least-once. A remote receiver can deduplicate using the stable `X-Notification-Job-Id` header. Exactly-once delivery is not claimed across independent database and webhook systems.
 
-**Test:** `tests/test_notification_worker.py` covers stale processing recovery.
+## 7. Completed jobs are protected
 
----
-
-## 6. At-least-once delivery and duplicate protection
-
-**Requirement:** The system should explicitly define what happens around worker crashes and external side effects.
-
-**Implementation:** Delivery is at-least-once. If a worker crashes after a remote receiver accepts the request but before the local job is marked `processed`, the job can be retried.
-
-**Deduplication mechanism:** Every webhook request includes `X-Notification-Job-Id`. A downstream receiver can use this stable job ID to make its own operation idempotent.
-
-**Trade-off:** Exactly-once delivery cannot be guaranteed across an independent external service and a local database without a shared transactional boundary. The system therefore favors durability of the lead and explicit retry semantics.
-
----
-
-## 7. Completed jobs are not re-delivered
-
-**Requirement:** A successfully completed notification must not be sent again by normal worker processing.
-
-**Implementation:** `process_job` returns immediately for jobs already marked `processed` or `failed`.
-
-**Test:** Worker tests verify that an already processed job does not trigger another webhook call.
-
----
+Normal worker processing skips jobs already marked `processed` or `failed`, preventing routine duplicate delivery.
 
 ## 8. Abuse and payload controls
 
-**Requirement:** Public submission endpoints should reject obviously abusive or oversized requests.
+The public endpoint enforces a 32 KB request-size ceiling, maximum 30 fields, maximum 100-character field names, maximum 2,000-character string values, a honeypot field, and per-widget/client-IP rate limiting. The endpoint also supports `Idempotency-Key`. fileciteturn386file0L2-L2
 
-**Implementation:** The API enforces:
+## 9. Geo enrichment fallback
 
-- maximum request payload size: 32 KB
-- maximum fields: 30
-- maximum field name length: 100 characters
-- maximum string value length: 2,000 characters
-- honeypot spam rejection
-- per-widget/client-IP rate limiting
+IP enrichment tries `ip-api.com`, then falls back to `ipapi.co`, and returns an empty geo result if both providers fail. fileciteturn388file0L2-L2
 
-**Evidence:** Validation constants and checks are implemented in `app/routers/submissions.py`.
+## 10. Containerized runtime
 
----
+`docker compose up --build` starts PostgreSQL, migrations, API, and the notification worker.
 
-## 9. Containerized runtime
+## 11. Automated verification
 
-**Requirement:** API and background processing should be reproducible in development.
-
-**Implementation:** `Dockerfile` packages the Python application. `docker-compose.yaml` defines PostgreSQL, the API container, and a separate notification worker container. PostgreSQL health checks prevent dependent services from starting before the database is ready.
-
-**Run:**
+Run the canonical capstone command:
 
 ```bash
-docker compose up --build
+docker compose exec api python -m pytest -q
 ```
 
----
-
-## 10. Automated verification
-
-The repository has GitHub Actions CI using Python 3.12 and PostgreSQL 16. The latest README commit was verified by workflow run `33621516333` with conclusion `success`.
-
-The test suite covers:
-
-- submission idempotency
-- notification job creation
-- worker job claiming
-- successful delivery
-- retry behavior
-- permanent failure
-- completed-job protection
-- stale processing recovery
+The repository now includes focused coverage for public submission validation, rate limiting, honeypot behavior, and geo fallback in addition to the existing reliability tests.
 
 ## Requirement-to-proof summary
 
@@ -144,14 +79,15 @@ The test suite covers:
 |---|---|---|
 | Safe side effect | DB-backed async job | Worker failure tests |
 | Durable enqueue | Submission + job transaction | Submission/job tests |
-| Idempotency | Unique key + conflict handling | `test_submission_idempotency.py` |
+| Idempotency | Unique key + conflict handling | Existing idempotency test |
 | Retry | Exponential backoff | Worker retry tests |
-| Permanent failure | `MAX_ATTEMPTS` | Max-attempt test |
-| Crash recovery | `processing_started_at` | Stale recovery test |
+| Permanent failure | Maximum attempts | Worker max-attempt test |
+| Crash recovery | Processing timestamp | Stale recovery test |
 | No duplicate completed delivery | Job state guard | Processed-job test |
-| Abuse protection | Limits + rate limiter + honeypot | Router validation behavior |
-| Reproducible runtime | Docker Compose | API + worker containers |
-| CI verification | GitHub Actions + PostgreSQL | Workflow run `33621516333` |
+| Abuse protection | Payload limits + rate limiter + honeypot | `test_public_submission.py`, `test_rate_limit.py`, `test_spam_honeypot.py` |
+| Geo fallback | Two-provider fallback | `test_geo_fallback.py` |
+| Reproducible runtime | Docker Compose | Canonical Docker/test command |
+| Evaluator probes | Probe 1–6 mapping | Automated + clearly marked manual checks |
 
 ## Final design statement
 
