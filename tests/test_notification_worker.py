@@ -1,7 +1,5 @@
 from datetime import datetime, timezone
 
-import pytest
-
 from app.models import NotificationJob, Submission
 from app.services import notification_worker
 
@@ -53,7 +51,7 @@ def make_job():
     return job
 
 
-def test_claim_next_job_moves_pending_job_to_processing(monkeypatch):
+def test_claim_next_job_moves_pending_job_to_processing():
     job = make_job()
     db = FakeDB(job)
 
@@ -126,3 +124,26 @@ def test_failed_delivery_is_permanently_failed_after_max_attempts(monkeypatch):
     assert job.attempts == notification_worker.MAX_ATTEMPTS
     assert job.last_error == "webhook unavailable"
     assert job.processed_at is not None
+
+
+def test_processed_job_does_not_trigger_webhook_again(monkeypatch):
+    job = make_job()
+    job.status = "processed"
+    job.processed_at = datetime.now(timezone.utc)
+
+    calls = 0
+
+    def track_delivery(_job):
+        nonlocal calls
+        calls += 1
+
+    monkeypatch.setattr(notification_worker, "deliver_webhook", track_delivery)
+
+    class DB:
+        def commit(self):
+            raise AssertionError("processed job should not be committed again")
+
+    notification_worker.process_job(DB(), job)
+
+    assert calls == 0
+    assert job.status == "processed"
