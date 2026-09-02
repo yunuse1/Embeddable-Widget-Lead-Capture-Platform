@@ -1,6 +1,6 @@
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -39,12 +39,11 @@ def validate_submission_data(data: dict[str, Any]) -> None:
             raise HTTPException(status_code=422, detail=f"Field '{key}' is too long")
 
 
-def get_idempotency_key(request: Request) -> str | None:
-    key = request.headers.get("Idempotency-Key")
-    if key is None:
+def get_idempotency_key(value: str | None) -> str | None:
+    if value is None:
         return None
 
-    key = key.strip()
+    key = value.strip()
     if not key:
         return None
     if len(key) > MAX_IDEMPOTENCY_KEY_LENGTH:
@@ -62,6 +61,7 @@ async def create_submission(
     request: Request,
     payload: SubmissionRequest,
     db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ):
     content_length = request.headers.get("content-length")
     if content_length and int(content_length) > MAX_PAYLOAD_BYTES:
@@ -80,7 +80,7 @@ async def create_submission(
         raise HTTPException(status_code=422, detail="Spam submission rejected")
 
     validate_submission_data(payload.data)
-    idempotency_key = get_idempotency_key(request)
+    idempotency_key = get_idempotency_key(idempotency_key)
 
     if idempotency_key is not None:
         existing = db.scalar(
