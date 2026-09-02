@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,16 +15,20 @@ def get_widget_config(public_id: str, db: Session = Depends(get_db)):
     widget = db.scalar(select(Widget).where(Widget.public_id == public_id, Widget.is_active.is_(True)))
     if widget is None:
         raise HTTPException(status_code=404, detail="Widget not found")
-    return {
-        "public_id": widget.public_id,
-        "widget_type": widget.widget_type,
-        "title": widget.title,
-        "description": widget.description,
-        "button_text": widget.button_text,
-        "fields": widget.fields,
-        "display_options": widget.display_options,
-        "version": "1",
-    }
+    return Response(
+        content=__import__("json").dumps({
+            "public_id": widget.public_id,
+            "widget_type": widget.widget_type,
+            "title": widget.title,
+            "description": widget.description,
+            "button_text": widget.button_text,
+            "fields": widget.fields,
+            "display_options": widget.display_options,
+            "version": "1",
+        }),
+        media_type="application/json",
+        headers={"Cache-Control": "public, max-age=300, must-revalidate", "Vary": "Origin"},
+    )
 
 
 @router.get("/widgets/{public_id}/embed")
